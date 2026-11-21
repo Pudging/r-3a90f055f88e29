@@ -13,6 +13,48 @@ class LanePlanner:
         self.context = None
         self.heading = None
 
+    def shelter(self, arena, config, me, enemy, move, boost, zone):
+        pos, stats = me["pos"], me["stats"]
+        ground_offset = pos[2] - arena.ground(*pos[:2])
+        if abs(ground_offset) > stats["step_up"] + 1:
+            return None
+        muzzles = []
+        x, y, z = enemy["pos"]
+        h = config["mech"]["muzzle_height"] * (1 + enemy.get("cubes", 0) * config["cubes"]["size_per_cube"])
+        muzzles.append((x, y, z + h))
+        vx, vy = enemy["vel"][:2]
+        speed = math.hypot(vx, vy)
+        if speed > 2:
+            heading = vx / speed, vy / speed
+            distance = min(speed * 0.6, 9.0)
+            if arena.walkable(enemy["pos"], heading, distance, stats["radius"], stats["height"], stats["step_up"], False):
+                ex, ey = x + distance * heading[0], y + distance * heading[1]
+                muzzles.append((ex, ey, z + h + arena.ground(ex, ey) - arena.ground(x, y)))
+
+
+        def hidden(heading, horizon):
+            dx, dy = displacement(me, heading, boost, horizon)
+            length = math.hypot(dx, dy)
+            x, y = pos[0] + dx, pos[1] + dy
+            if math.dist((x, y), zone["center"]) >= zone["radius"] - stats["radius"]:
+                return False
+            if length > 0.1 and not arena.walkable(pos, (dx / length, dy / length), length,
+                    stats["radius"], stats["height"], stats["step_up"], False):
+                return False
+            z = arena.ground(x, y) + stats["height"] * 0.72
+            return all(not arena.clear_shot(m, (x-m[0], y-m[1], z-m[2]), 1) for m in muzzles)
+
+        if hidden((0, 0), 0.70):
+            return (0, 0)
+        angle = math.atan2(move[1], move[0])
+        headings = [(math.cos(angle+d), math.sin(angle+d)) for d in
+                    (0, 0.48, -0.48, 0.95, -0.95, 1.5, -1.5, 2.15, -2.15, math.pi)]
+        for horizon in (0.65, 1.25, 2.0):
+            for heading in headings:
+                if hidden(heading, horizon):
+                    return heading
+        return None
+
     def choose(self, arena, config, obs, enemies, target, mode, move, boost, jump, damage_time):
         me, pos = obs["self"], obs["self"]["pos"]
         if (obs["alive"] <= 2 or jump or not me["grounded"] or not me["in_zone"]
@@ -33,10 +75,16 @@ class LanePlanner:
             self.context = None
             return move
         others = [e for e in enemies if e["id"] != primary["id"]][:2]
-        context = (primary["id"], tuple(e["id"] for e in others), defensive, mode, boost)
+        urgent = (defensive and health < 0.40 and len(enemies) == 1
+                  and enemy_hp > me["hp"] * 1.5)
+        context = (primary["id"], tuple(e["id"] for e in others), defensive, urgent, mode, boost)
         if self.context == context and obs["t"] < self.until:
             return self.heading if self.heading is not None else move
         self.context, self.until, self.heading = context, obs["t"] + 0.29, None
+        if urgent:
+            self.heading = self.shelter(arena, config, me, primary, move, boost, obs["zone"])
+            if self.heading is not None:
+                return self.heading
         stats = me["stats"]
         observers = []
         for enemy in [primary, *others]:
