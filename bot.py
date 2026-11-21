@@ -7,6 +7,7 @@ from random import Random
 from arena import Arena
 from guard import guarded_move
 from lane import LanePlanner
+from navigation import Navigation
 import mechfight as mf
 
 
@@ -60,11 +61,12 @@ def intercept(offset, velocity, speed):
 
 
 class Helios:
-    name = "potato-guard-lane-conversion"
+    name = "potato-guard-route"
 
     def __init__(self, hello):
         self.config = hello["config"]
         self.rng = Random(hello["seed"])
+        self.navigation = Navigation()
         map_dir = Path(hello["map"]["dir"])
         # On a Windows host check.py can resolve the Linux /arena mount to C:\arena.
         if not (map_dir / "v2" / "world.json").is_file():
@@ -321,7 +323,7 @@ class Helios:
             self.anchor = next_center[0] + ring * math.cos(angle), next_center[1] + ring * math.sin(angle)
         return self.anchor, "patrol"
 
-    def move(self, obs, me, goal, mode):
+    def move(self, obs, me, goal, mode, routed=False):
         pos = me["pos"]
         distance = horizontal(pos, goal)
         if mode in ("capture", "farm") and distance < (3.2 if mode == "capture" else 1):
@@ -335,6 +337,8 @@ class Helios:
         boost = me["energy"] > (8 if mode == "zone" else 23)
         boost = boost and (mode == "zone" or danger or (mode in ("capture", "loot") and distance > 19))
         horizon = min(13.0, max(4.2, distance), stats["boost_speed" if boost else "walk_speed"] * 0.75)
+        if routed:
+            horizon = min(horizon, distance)
         radius = stats["radius"]
         allowed = self.arena.walkable
         obstacles = []
@@ -349,7 +353,7 @@ class Helios:
             obstacles.append((progress + 0.17 * momentum - risk, heading))
         if obstacles:
             heading = max(obstacles, key=lambda item: item[0])[1]
-            scale = min(1.0, distance / 5) if mode in ("capture", "loot", "farm") else 1.0
+            scale = min(1.0, distance / 5) if routed or mode in ("capture", "loot", "farm") else 1.0
             jump = airborne and me["energy"] > 18 and goal[2:3] and goal[2] > pos[2] + 5
             return [v * scale for v in heading], bool(boost or jump), False
         needed = mode in ("zone", "loot", "capture") and me["energy"] > 31
@@ -398,7 +402,8 @@ class Helios:
         )
         action, target = self.engage(obs, me, nearby)
         goal, mode = self.goal(obs, me, nearby, target)
-        move, boost, jump = self.move(obs, me, goal, mode)
+        waypoint = self.navigation.steer(self.arena, obs, goal, mode, nearby)
+        move, boost, jump = self.move(obs, me, waypoint, mode, routed=waypoint is not goal)
         move = self.lanes.choose(self.arena, self.config, obs, nearby, target, mode,
                                  move, boost, jump, self.last_damage)
         move, boost = guarded_move(self.arena, self.config, obs, move, boost, jump, goal, mode)
