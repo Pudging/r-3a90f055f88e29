@@ -60,7 +60,7 @@ def intercept(offset, velocity, speed):
 
 
 class Helios:
-    name = "potato-guard-lane"
+    name = "potato-guard-lane-conversion"
 
     def __init__(self, hello):
         self.config = hello["config"]
@@ -138,10 +138,26 @@ class Helios:
             return None
         return (angles, flight) if self.arena.clear_shot(muzzle, offset, 1.0) else None
 
+    def finish_bonus(self, target, damage):
+        if target["kind"] != "mech" or "hp" not in target:
+            return 0.0
+        # Value damage that removes a gun from a fight within a partial magazine.
+        rounds = max(0.0, target["hp"]) / damage
+        return 18.0 / (1.0 + (rounds / 8.0) ** 2)
+
     def engage(self, obs, me, enemies):
         pos = me["pos"]
         action = {"aim": me["aim"], "fire": [False, False]}
         options = []
+        finish_damage = None
+        if len(enemies) > 1:
+            # Preserve Guard Lane's choice whenever that choice could trigger its cover rule.
+            cover_needed = (me["hp"] < me["max_hp"] * 0.58
+                            and obs["t"] - self.last_damage < self.config["mech"]["regen_delay"] + 0.4
+                            and any(me["hp"] < enemy.get("hp", me["max_hp"]) * 0.8 for enemy in enemies))
+            if not cover_needed:
+                finish_damage = next((w["stats"]["damage"] for w in me["weapons"] if w and w["kind"] == "gun"),
+                                     self.config["weapons"]["gun"]["damage"])
         if not enemies:
             drones = [
                 item for item in obs["mechs"]
@@ -154,6 +170,7 @@ class Helios:
             enemies = sorted(drones + crates, key=lambda item: horizontal(pos, item["pos"]))[:3]
         for target in enemies[:5]:
             distance = horizontal(pos, target["pos"])
+            finish = self.finish_bonus(target, finish_damage) if finish_damage else 0.0
             for slot, weapon in enumerate(me["weapons"]):
                 if weapon is None:
                     continue
@@ -172,7 +189,7 @@ class Helios:
                 ready = max(weapon["cooldown"], weapon.get("reload", 0))
                 value = min(11.5, stats["damage"] * 0.042) - 3.6 * yaw_error - 1.8 * pitch_error
                 value -= min(9, ready * 10) + distance * 0.025 + flight * 1.1
-                value += 6 if target["kind"] == "mech" else -1
+                value += (6 if target["kind"] == "mech" else -1) + finish
                 if target["id"] == self.target_id:
                     value += 1.8
                 if target.get("hp", 1000) < stats["damage"] * 1.3:
