@@ -6,6 +6,7 @@ from random import Random
 
 from arena import Arena
 from guard import guarded_move
+from lane import LanePlanner
 import mechfight as mf
 
 
@@ -59,7 +60,7 @@ def intercept(offset, velocity, speed):
 
 
 class Helios:
-    name = "potato-helios-guard"
+    name = "potato-guard-lane"
 
     def __init__(self, hello):
         self.config = hello["config"]
@@ -75,6 +76,7 @@ class Helios:
         self.anchor_time = 0.0
         self.last_damage = -100.0
         self.damage_bearing = None
+        self.lanes = LanePlanner()
 
     def shot(self, me, target, weapon):
         kind = weapon["kind"]
@@ -380,6 +382,8 @@ class Helios:
         action, target = self.engage(obs, me, nearby)
         goal, mode = self.goal(obs, me, nearby, target)
         move, boost, jump = self.move(obs, me, goal, mode)
+        move = self.lanes.choose(self.arena, self.config, obs, nearby, target, mode,
+                                 move, boost, jump, self.last_damage)
         move, boost = guarded_move(self.arena, self.config, obs, move, boost, jump, goal, mode)
         action.update(tick=obs["tick"], move=move, boost=boost, jump=jump)
         if obs["offer"]:
