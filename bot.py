@@ -50,7 +50,7 @@ def aim_for(vector):
 
 
 def intercept(offset, velocity, speed):
-    # Solve |offset + velocity * t|² = speed² * t² for the intercept.
+    # Solve |offset + velocity * t|Â² = speedÂ² * tÂ² for the intercept.
     a = speed * speed - sum(v * v for v in velocity)
     b = sum(p * v for p, v in zip(offset, velocity))
     c = sum(p * p for p in offset)
@@ -60,7 +60,7 @@ def intercept(offset, velocity, speed):
 
 
 class Helios:
-    name = "potato-guard-lane-conversion"
+    name = "potato-guard-contest-reach"
 
     def __init__(self, hello):
         self.config = hello["config"]
@@ -285,10 +285,13 @@ class Helios:
                 and abs(p["pos"][2] - pos[2]) < 15
                 and horizontal(center, p["pos"]) < zone["radius"] - 3
             ]
+            reach = 105 if len(held) < 2 else 24
+            if len(held) < 2 and not enemies and obs["t"] - self.last_damage >= self.config["mech"]["regen_delay"]:
+                reach = 135
             items.extend(
                 (horizontal(pos, p["pos"]) - 10, p["pos"])
                 for p in obs["pickups"]
-                if p["kind"] not in held and p["kind"] != "gun" and horizontal(pos, p["pos"]) < (105 if len(held) < 2 else 24)
+                if p["kind"] not in held and p["kind"] != "gun" and horizontal(pos, p["pos"]) < reach
                 and abs(p["pos"][2] - pos[2]) < 18
                 and horizontal(center, p["pos"]) < zone["radius"] - 4
             )
