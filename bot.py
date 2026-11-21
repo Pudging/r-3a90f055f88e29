@@ -50,7 +50,7 @@ def aim_for(vector):
 
 
 def intercept(offset, velocity, speed):
-    # Solve |offset + velocity * t|² = speed² * t² for the intercept.
+    # Solve |offset + velocity * t|Â² = speedÂ² * tÂ² for the intercept.
     a = speed * speed - sum(v * v for v in velocity)
     b = sum(p * v for p, v in zip(offset, velocity))
     c = sum(p * p for p in offset)
@@ -60,7 +60,7 @@ def intercept(offset, velocity, speed):
 
 
 class Helios:
-    name = "potato-guard-lane-conversion"
+    name = "potato-guard-pressure-release"
 
     def __init__(self, hello):
         self.config = hello["config"]
@@ -277,6 +277,28 @@ class Helios:
                 drops.append((distance, drop["pos"]))
         if drops:
             return min(drops, key=lambda item: item[0])[1], "capture"
+        on_detour = any(horizontal(pos, p["pos"]) < 12 and abs(p["pos"][2]-pos[2]) < 4
+                        for p in obs["pickups"] if not all(me["weapons"]) and p["kind"] != "gun")
+        if obs["alive"] > 3 and zone["next_radius"] >= 25 and not on_detour:
+            # Favor the outside of the next scoring circle. A small dead band
+            # lets the battery refill between circle changes.
+            # The circle can drift. Blend now and next so the outside path
+            # advances with the shrinking zone instead of crossing it early.
+            time_left = max(0., zone["shrink_end"] - obs["t"])
+            fraction = min(0.8, time_left / 90)
+            rim_center = [b + fraction * (a-b) for a, b in zip(center, next_center)]
+            radius = (zone["next_radius"] + fraction * (zone["radius"] - zone["next_radius"])) * 0.88
+            distance = horizontal(pos, rim_center)
+            if abs(radius - distance) < 10 and enemy_range > 95:
+                return pos, "ring"
+            dx, dy = heading_to(rim_center, pos)
+            if not (dx or dy):
+                dx = self.side
+            angle = math.atan2(dy, dx)
+            if enemy_range < 110:
+                angle += self.side * min(0.7, 40 / radius)
+            return (rim_center[0] + radius * math.cos(angle),
+                    rim_center[1] + radius * math.sin(angle)), "ring"
         if enemy_range > 22 or health > 0.65:
             held = {w["kind"] for w in me["weapons"] if w}
             items = [
@@ -285,10 +307,12 @@ class Helios:
                 and abs(p["pos"][2] - pos[2]) < 15
                 and horizontal(center, p["pos"]) < zone["radius"] - 3
             ]
+            best_secondary = max((WEAPON_VALUE[k] for k in held if k != "gun"), default=0)
             items.extend(
                 (horizontal(pos, p["pos"]) - 10, p["pos"])
                 for p in obs["pickups"]
-                if p["kind"] not in held and p["kind"] != "gun" and horizontal(pos, p["pos"]) < (105 if len(held) < 2 else 24)
+                if p["kind"] not in held and p["kind"] != "gun" and WEAPON_VALUE[p["kind"]] > best_secondary
+                and horizontal(pos, p["pos"]) < (105 if len(held) < 2 else 24)
                 and abs(p["pos"][2] - pos[2]) < 18
                 and horizontal(center, p["pos"]) < zone["radius"] - 4
             )
